@@ -1,0 +1,118 @@
+#!/bin/bash
+#
+# This script automates the full dependency installation for running
+# Ultralytics YOLOv8 on a Jetson Nano with JetPack 4.6 (Python 3.6).
+#
+# It will:
+# 1. Create and enable a 6GB swap file.
+# 2. Install all system-level (apt) dependencies.
+# 3. Install the correct PyTorch wheel from NVIDIA.
+# 4. Clone, build, and install the correct torchvision version.
+# 5. Install all Python (pip) dependencies in the right order.
+# 6. Clone and install the Python 3.6-compatible ultralytics package.
+#
+# Run this script with:
+# chmod +x install_deps.sh
+# ./install_deps.sh
+#
+
+# Exit immediately if any command fails
+set -e
+
+echo "--- Starting Jetson Nano YOLO setup ---"
+
+# --- Step 2: Increase Swap Space ---
+
+
+# --- Step 3: Install System Dependencies ---
+echo "Installing system dependencies via apt-get..."
+sudo apt-get update
+sudo apt-get install -y libffi-dev libssl-dev
+sudo apt-get install -y libopenblas-base libopenmpi-dev libjpeg-dev zlib1g-dev
+
+
+# --- Step 4: Install PyTorch ---
+echo "Installing PyTorch v1.10.0..."
+sudo apt install python3-numpy
+sudo apt-get install -y python3-pip
+pip3 install Cython
+# Download the PyTorch wheel
+wget -q --show-progress https://nvidia.box.com/shared/static/fjtbno0vpo676a25cgvuqc1wty0fkkg6.whl -O torch-1.10.0-cp36-cp36m-linux_aarch64.whl
+# Install the wheel
+pip3 install torch-1.10.0-cp36-cp36m-linux_aarch64.whl
+echo "PyTorch installation complete."
+
+
+# --- Step 5: Install torchvision ---
+echo "Installing torchvision v0.11.1 from source (this will take several minutes)..."
+# Remove old directory if it exists
+rm -rf torchvision
+# Clone the correct branch
+git clone --branch v0.11.1 https://github.com/pytorch/vision torchvision
+cd torchvision
+export BUILD_VERSION=0.11.1
+# Build and install
+python3 setup.py install --user
+# Go back to the original directory
+cd ../
+echo "torchvision installation complete."
+
+
+# --- Step 6: Install Build Tools for ONNX ---
+echo "Installing build tools (cmake, protobuf) for ONNX..."
+# These are required to build the 'onnx' package from source
+sudo apt-get install -y python3-matplotlib python3-scipy python3-pil python3-h5py protobuf-compiler libprotoc-dev cmake
+
+
+# --- Step 7: Install ONNX and ONNX-RUNTIME (NOW WITH MAX_JOBS FIX) ---
+echo "Installing ONNX and ONNX-RUNTIME..."
+
+# First, download the pre-built ONNX-RUNTIME wheel from NVIDIA
+echo "Downloading pre-built onnxruntime-gpu wheel..."
+wget -q --show-progress https://nvidia.box.com/shared/static/jy7nqva7l88mq9i8bw3g3sklzf4kccn2.whl -O onnxruntime_gpu-1.10.0-cp36-cp36m-linux_aarch64.whl
+
+# Install the onnxruntime wheel
+echo "Installing onnxruntime-gpu..."
+pip3 install onnxruntime_gpu-1.10.0-cp36-cp36m-linux_aarch64.whl
+
+# Now, install the other pip packages.
+# THIS IS THE FIX: Limit build jobs to 2 to prevent out-of-memory error
+export MAX_JOBS=2
+echo "Installing other pip packages (pyyaml, onnx==1.10.0) with MAX_JOBS=2..."
+# This will build 'onnx==1.10.0' from source using cmake, but with limited resources.
+pip3 install tqdm psutil pyyaml==5.4.1 onnx==1.10.0
+
+
+# --- Step 8: Install ultralytics (NOW WITH MANUAL TAR FIX) ---
+echo "Installing Python 3.6-compatible ultralytics package..."
+# Go to home directory
+cd ~/
+# Remove old directory if it exists
+rm -rf jetson-nano
+# Clone the special repo
+git clone https://github.com/aminalaghband/jetson-nano.git
+cd jetson-nano
+
+# --- NEW MANUAL INSTALL FIX ---
+echo "Manually extracting and installing ultralytics to avoid zip error..."
+# Extract the tar.gz file
+tar -xzf ultralytics-8.0.208.tar.gz
+# Go into the extracted directory
+cd ultralytics-8.0.208
+# Run the setup.py installer
+python3 setup.py install --user
+# --- END NEW MANUAL INSTALL ---
+
+echo "Ultralytics installation complete."
+
+
+# --- Step 9: Done! ---
+echo ""
+echo "--- ALL DEPENDENCIES INSTALLED SUCCESSFULLY! ---"
+echo ""
+echo "You can now run the person detector script."
+echo "Make sure 'person_detector.py' is in your home directory (~/)"
+echo "or 'cd' to its location, then run:"
+echo "python3 person_detector.py"
+echo ""
+echo "Note: The *first* run will take 5-15 minutes to build the TensorRT engine."
